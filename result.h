@@ -6,11 +6,20 @@
 #define ERRORHANDLING_RESULT_H
 
 #include <functional>
+#include <gsl/assert>
 
 #include "storage.h"
 #include "error.h"
 
 #include "common_errors.h"
+
+#if defined(__clang__) || defined(__GNUC__)
+#define ERR_LIKELY(x) __builtin_expect(!!(x), 1)
+#define ERR_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define GSL_LIKELY(x) (!!(x))
+#define GSL_UNLIKELY(x) (!!(x))
+#endif // defined(__clang__) || defined(__GNUC__)
 
 namespace detail
 {
@@ -49,6 +58,18 @@ detail::failed_result<std::decay_t<Error>> error(ErrorCode code, std::string exp
     return { .error = std::move(e) };
 }
 
+struct default_final_action
+{
+    template<class T>
+    constexpr void operator()(const T&) const { };
+} g_default_final_action;
+
+template<class T, class R>
+constexpr inline bool is_final_action_v =
+    std::is_invocable_v<T, const R&> &&
+    std::is_class_v<T> &&
+    std::is_default_constructible_v<T>;
+
 }
 
 detail::ok_result<> ok()
@@ -62,29 +83,32 @@ detail::ok_result<std::remove_const_t<Value>> ok(Value value)
     return { .value = std::move(value) };
 }
 
-template<class Value = void, class Error = error>
+template<class Value = void, class Error = error, class FinalAction = detail::default_final_action>
 class result;
 
-template<class Value, class Error>
+template<class Value, class Error, class FinalAction>
 class [[nodiscard]] result
 {
 public:
-    result(result&&) = default;
+    static_assert(detail::is_final_action_v<FinalAction, result>,
+                  "final action must be invocable, an object and default constructible");
+
+    result(result&&) noexcept = default;
 
     result(detail::failed_result<Error>&& e) // NOLINT(google-explicit-constructor)
-        : m_result(std::move(e.error))
+        : m_data(detail::result_storage<Value, Error>(std::move(e.error)), FinalAction{})
     {
     }
 
     result(detail::ok_result<Value>&& e) // NOLINT(google-explicit-constructor)
-        : m_result(std::move(e.value))
+        : m_data(detail::result_storage<Value, Error>(std::move(e.value)), FinalAction{})
     {
     }
 
-    [[nodiscard]] finline bool is_ok() const { return m_result.has_value(); }
-    [[nodiscard]] finline bool has_failed() const { return !is_ok(); }
-    [[nodiscard]] finline auto get_error() const -> const Error& { return m_result.get_error(); }
-    [[nodiscard]] finline auto get_value() const -> const Value& { return m_result.get_value(); }
+    [[nodiscard]] finline bool is_ok() const { return get_storage().has_value(); }
+    [[nodiscard]] finline bool has_failed() const { return !get_storage().has_value(); }
+    [[nodiscard]] finline auto get_error() const -> const Error& { Expects(has_failed()); return get_storage().get_error(); }
+    [[nodiscard]] finline auto get_value() const -> const Value& { Expects(is_ok()); return get_storage().get_value(); }
     [[nodiscard]] finline explicit operator bool() const { return is_ok(); }
 
     template<class F, typename = std::enable_if_t<std::is_invocable_v<F, Error>>>
@@ -110,22 +134,22 @@ public:
     }
 
     template<class F, typename = std::enable_if_t<std::is_invocable_v<F, Value>>>
-    [[nodiscard]] auto map(F func) & -> result<decltype(std::invoke(func, get_value())), Error>
+    [[nodiscard]] auto map_value(F func) & -> result<decltype(std::invoke(func, get_value())), Error>
     {
         if(has_failed())
         {
-            return detail::error(get_error());
+            return std::move(*this);
         }
 
         return ok(std::invoke(func, get_value()));
     }
 
     template<class F, typename = std::enable_if_t<std::is_invocable_v<F, Value>>>
-    [[nodiscard]] auto map(F func) && -> result<decltype(std::invoke(func, get_value())), Error>
+    [[nodiscard]] auto map_value(F func) && -> result<decltype(std::invoke(func, get_value())), Error>
     {
         if(has_failed())
         {
-            return detail::error(get_error());
+            return std::move(*this);
         }
 
         return ok(std::invoke(func, get_value()));
@@ -133,29 +157,49 @@ public:
 
     finline void ignore() const { }
 
+    ~result()
+    {
+        std::invoke(get_final_action(), *this);
+    }
+
 private:
-    detail::result_storage<Value, Error> m_result;
+    [[nodiscard]] auto get_storage() -> detail::result_storage<Value, Error>& { return std::get<0>(m_data); }
+    [[nodiscard]] auto get_storage() const -> const detail::result_storage<Value, Error>& { return std::get<0>(m_data); }
+    [[nodiscard]] auto get_final_action() -> FinalAction& { return std::get<1>(m_data); }
+
+    std::tuple<detail::result_storage<Value, Error>, FinalAction> m_data;
 };
 
-template<class Error>
-class [[nodiscard]] result<void, Error>
-{
+// sbo
+static_assert(sizeof(result<char, error>) == sizeof(detail::result_storage<char, error>),
+              "result<T> with default final action must only occupy memory to store the error/value");
+
+// heap
+static_assert(sizeof(result<char[sizeof(error) + 1], error>) == sizeof(detail::result_storage<char[sizeof(error) + 1], error>),
+              "result<T> with default final action must only occupy memory to store the error/value");
+
+template<class Error, class FinalAction>
+class [[nodiscard]] result<void, Error, FinalAction> {
 public:
+    static_assert(detail::is_final_action_v<FinalAction, result>,
+                  "final action must be invocable, an object and default constructible");
+
     result() = default;
-    result(result&&) noexcept = default;
 
-    result(detail::ok_result<>&&) // NOLINT(google-explicit-constructor)
+    result(result &&) noexcept = default;
+
+    result(detail::ok_result<> &&) // NOLINT(google-explicit-constructor)
     {
     }
 
-    result(detail::failed_result<Error>&& e) // NOLINT(google-explicit-constructor)
-        : m_error(std::move(e.error))
+    result(detail::failed_result<Error> &&e) // NOLINT(google-explicit-constructor)
+        : m_data(detail::pointer_storage<Error>(std::move(e.error)), FinalAction{})
     {
     }
 
-    [[nodiscard]] finline bool is_ok() const { return !m_error.has_value(); }
-    [[nodiscard]] finline bool has_failed() const { return !is_ok(); }
-    [[nodiscard]] finline auto get_error() const -> const Error& { return m_error.get(); }
+    [[nodiscard]] finline bool is_ok() const { return !get_error_storage().has_value(); }
+    [[nodiscard]] finline bool has_failed() const { return get_error_storage().has_value(); }
+    [[nodiscard]] finline auto get_error() const -> const Error& { Expects(has_failed()); return get_error_storage().get(); }
     [[nodiscard]] finline explicit operator bool() const { return is_ok(); }
 
     template<class F, typename = std::enable_if_t<std::is_invocable_v<F, Error>>>
@@ -181,9 +225,29 @@ public:
     }
 
     finline void ignore() const { }
+    finline void dismiss() { get_error_storage().reset(); }
+
+    ~result()
+    {
+        std::invoke(get_final_action(), *this);
+    }
 
 private:
-    detail::pointer_storage<Error> m_error;
+    [[nodiscard]] auto get_error_storage() -> detail::pointer_storage<Error>& { return std::get<0>(m_data); }
+    [[nodiscard]] auto get_error_storage() const -> const detail::pointer_storage<Error>& { return std::get<0>(m_data); }
+    [[nodiscard]] auto get_final_action() const -> const FinalAction& { return std::get<1>(m_data); }
+
+    std::tuple<detail::pointer_storage<Error>, FinalAction> m_data;
+
 };
+
+static_assert(sizeof(result<void, error>) == sizeof(detail::pointer_storage<error>),
+              "result with default final action must only occupy memory to store the error");
+
+template<class V, class E, class F>
+std::ostream& operator<<(std::ostream& os, const result<V, E, F>& result)
+{
+    return os << result.get_error().to_string();
+}
 
 #endif //ERRORHANDLING_RESULT_H

@@ -20,10 +20,27 @@ namespace errors
     DEFINE_ERROR_CODE(4, general_error_category, not_implemented_error, "Function not implemented");
 }
 
-result<> ok_result() { return ok(); }
-result<> failed_result() { return err(errors::unknown_error{}, ""); }
-result<int> ok_int_result() { return ok(1); }
-result<int> failed_int_result() { return err(errors::unknown_error{}, ""); }
+struct fmtLogger
+{
+    void operator()(const auto &r) const
+    {
+        if (r.has_failed())
+        {
+            fmt::print("{}", r);
+        }
+    }
+};
+
+static_assert(std::is_class_v<fmtLogger>, " ");
+static_assert(std::is_default_constructible_v<fmtLogger>, " ");
+
+template<class V = void>
+using mresult = result<V, error, fmtLogger>;
+
+mresult<> ok_result() { return ok(); }
+mresult<> failed_result() { return err(errors::unknown_error{}, ""); }
+mresult<int> ok_int_result() { return ok(1); }
+mresult<int> failed_int_result() { return err(errors::unknown_error{}, ""); }
 
 TEST_CASE( "Basic properties of result<>" )
 {
@@ -44,19 +61,19 @@ TEST_CASE( "Basic properties of result<int>" )
 
 TEST_CASE( "Error handling macros" )
 {
-    REQUIRE( []() -> result<>
+    REQUIRE( []() -> mresult<>
              {
                  TRY(ok_result());
                  return ok();
              }().is_ok() );
 
-    REQUIRE( []() -> result<>
+    REQUIRE( []() -> mresult<>
              {
                  TRY(failed_result());
                  return ok();
              }().has_failed() );
 
-    const auto test_ok_int_result = []() -> result<int>
+    const auto test_ok_int_result = []() -> mresult<int>
     {
         TRY_ASSIGN(const auto i, ok_int_result());
         return ok(i);
@@ -65,7 +82,7 @@ TEST_CASE( "Error handling macros" )
     REQUIRE( test_ok_int_result().is_ok() );
     REQUIRE( test_ok_int_result().get_value() == 1 );
 
-    REQUIRE( []() -> result<>
+    REQUIRE( []() -> mresult<>
              {
                  TRY(failed_int_result());
                  return ok();
@@ -74,8 +91,8 @@ TEST_CASE( "Error handling macros" )
 
 TEST_CASE( "Error message format" )
 {
-    const result<> r = err(errors::unknown_error{}, "UNIT TEST");
-    fmt::print("{}", r.get_error().to_string());
+    mresult<> r = err(errors::unknown_error{}, "UNIT TEST");
+    fmt::print("{}", r);
 
     //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
     //    Description:     Undefined error
@@ -95,25 +112,27 @@ TEST_CASE( "Error message format" )
 
     REQUIRE( std::regex_search(r.get_error().to_string().data(), m,
                                std::regex("\\s*Category:        general_error_category")) );
+
+    r.dismiss();
 }
 
 
 TEST_CASE( "Assertions" )
 {
-    const auto ok_result_precond = []() -> result<> { EXPECT(ok_result(), ""); return ok(); };
-    const auto failed_result_precond = []() -> result<> { EXPECT(failed_result(), ""); ; return ok();};
-    const auto ok_precond = []() -> result<> { EXPECT(true, ""); return ok(); };
-    const auto failed_precond = []() -> result<> { EXPECT(false, ""); ; return ok();};
+    const auto ok_result_precond = []() -> mresult<> { EXPECT(ok_result(), ""); return ok(); };
+    const auto failed_result_precond = []() -> mresult<> { EXPECT(failed_result(), ""); ; return ok();};
+    const auto ok_precond = []() -> mresult<> { EXPECT(true, ""); return ok(); };
+    const auto failed_precond = []() -> mresult<> { EXPECT(false, ""); ; return ok();};
 
     REQUIRE_NOTHROW( ok_result_precond().ignore() );
     REQUIRE_THROWS( failed_result_precond().ignore() );
     REQUIRE_NOTHROW( ok_precond().ignore() );
     REQUIRE_THROWS( failed_precond().ignore() );
 
-    const auto ok_result_postcond = []() -> result<> { ENSURE(ok_result(), "");  return ok();};
-    const auto failed_result_postcond = []() -> result<> { ENSURE(failed_result(), ""); return ok(); };
-    const auto ok_postcond = []() -> result<> { ENSURE(true, ""); return ok(); };
-    const auto failed_postcond = []() -> result<> { ENSURE(false, ""); ; return ok();};
+    const auto ok_result_postcond = []() -> mresult<> { ENSURE(ok_result(), "");  return ok();};
+    const auto failed_result_postcond = []() -> mresult<> { ENSURE(failed_result(), ""); return ok(); };
+    const auto ok_postcond = []() -> mresult<> { ENSURE(true, ""); return ok(); };
+    const auto failed_postcond = []() -> mresult<> { ENSURE(false, ""); ; return ok();};
 
     REQUIRE_NOTHROW( ok_result_postcond().ignore() );
     REQUIRE_THROWS( failed_result_postcond().ignore() );

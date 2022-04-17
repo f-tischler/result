@@ -130,9 +130,8 @@ public:
     {
     }
 
-    [[nodiscard]] finline const error_code& get_code() const { return m_code; }
-
-    [[nodiscard]] std::string to_string() const
+    [[nodiscard]] finline auto get_code() const -> const error_code& { return m_code; }
+    [[nodiscard]] auto to_string() const -> std::string
     {
         return fmt::format("Error '{}' occurred at {}:{}\n"
                            "    Description:     {}\n"

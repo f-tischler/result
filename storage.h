@@ -43,6 +43,8 @@ namespace detail
         [[nodiscard]] finline auto get() && -> T&& { return std::move(m_error).value(); }
         [[nodiscard]] finline T* operator ->() { return &m_error.value(); }
 
+        void reset() { m_error.reset(); }
+
     private:
         std::optional<T> m_error;
     };
@@ -68,6 +70,8 @@ namespace detail
         [[nodiscard]] finline auto get() & -> T& { return *m_data; }
         [[nodiscard]] finline auto get() && -> T&& { return std::move(*m_data); }
         [[nodiscard]] finline T* operator ->() { return m_data.get(); }
+
+        void reset() { m_data.reset(); }
 
     private:
         std::unique_ptr<T> m_data;
