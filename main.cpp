@@ -8,6 +8,7 @@
 #include <regex>
 
 #include "result.h"
+#include "formatting.h"
 #include "macros.h"
 
 namespace errors
