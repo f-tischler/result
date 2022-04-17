@@ -131,21 +131,9 @@ public:
     }
 
     [[nodiscard]] finline auto get_code() const -> const error_code& { return m_code; }
-    [[nodiscard]] auto to_string() const -> std::string
-    {
-        return fmt::format("Error '{}' occurred at {}:{}\n"
-                           "    Description:     {}\n"
-                           "{}"
-                           "    Category:        {}\n",
-                           m_code.get_name(),
-                           m_src_loc.file,
-                           m_src_loc.line,
-                           m_code.get_description(),
-                           m_explanation.empty()
-                               ? ""
-                               : fmt::format("    Additional Info: {}\n", m_explanation),
-                           m_code.get_category().get_name());
-    }
+    [[nodiscard]] finline auto get_explanation() const -> std::string_view { return m_explanation; }
+    [[nodiscard]] finline auto get_origin() const -> const source_location& { return m_src_loc; }
+    [[nodiscard]] finline auto get_inner_error() const -> const error* { return m_inner_error.get(); }
 
     finline operator uint64_t() const { return m_code.get_id(); } // NOLINT(google-explicit-constructor)
 

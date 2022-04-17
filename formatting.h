@@ -11,11 +11,22 @@ template<>
 struct fmt::formatter<error>
     : formatter<string_view>
 {
-    // parse is inherited from formatter<string_view>.
     template <typename FormatContext>
     auto format(const error& e, FormatContext& ctx)
     {
-        return fmt::formatter<string_view>::format(e.to_string(), ctx);
+        return format_to(ctx.out(),
+                         "Error '{}' occurred at {}:{}\n"
+                         "    Description:     {}\n"
+                         "{}"
+                         "    Category:        {}\n",
+                         e.get_code().get_name(),
+                         e.get_origin().file,
+                         e.get_origin().line,
+                         e.get_code().get_description(),
+                         e.get_explanation().empty()
+                           ? ""
+                           : fmt::format("    Additional Info: {}\n", e.get_explanation()),
+                         e.get_code().get_category().get_name());
     }
 };
 
