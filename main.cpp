@@ -13,34 +13,34 @@
 
 namespace errors
 {
-    DEFINE_ERROR_CATEGORY(2, general_error_category);
+    DEFINE_ERROR_CATEGORY(3, general_error_category);
     DEFINE_ERROR_CODE(1, general_error_category, unknown_error, "Undefined error");
     DEFINE_ERROR_CODE(2, general_error_category, invalid_pointer_error, "Null pointer error");
     DEFINE_ERROR_CODE(3, general_error_category, argument_out_of_range_error, "Argument out of range");
     DEFINE_ERROR_CODE(4, general_error_category, not_implemented_error, "Function not implemented");
 }
 
-struct fmtLogger
+struct LogErrorOnDestruction
 {
     void operator()(const auto &r) const
     {
         if (r.has_failed())
         {
-            fmt::print("{}", r);
+            fmt::print("{}\n", r);
         }
     }
 };
 
-static_assert(std::is_class_v<fmtLogger>, " ");
-static_assert(std::is_default_constructible_v<fmtLogger>, " ");
+static_assert(std::is_class_v<LogErrorOnDestruction>, " ");
+static_assert(std::is_default_constructible_v<LogErrorOnDestruction>, " ");
 
 template<class V = void>
-using mresult = result<V, error, fmtLogger>;
+using mresult = result<V, error, LogErrorOnDestruction>;
 
 mresult<> ok_result() { return ok(); }
-mresult<> failed_result() { return err(errors::unknown_error{}, ""); }
+mresult<> failed_result() { return err(errors::unknown_error{}, "failed_result"); }
 mresult<int> ok_int_result() { return ok(1); }
-mresult<int> failed_int_result() { return err(errors::unknown_error{}, ""); }
+mresult<int> failed_int_result() { return err(errors::unknown_error{}, "failed_int_result"); }
 
 TEST_CASE( "Basic properties of result<>" )
 {
@@ -92,7 +92,8 @@ TEST_CASE( "Error handling macros" )
 TEST_CASE( "Error message format" )
 {
     mresult<> r = err(errors::unknown_error{}, "UNIT TEST");
-    fmt::print("{}", r);
+    std::string s = fmt::format("{}", r);
+    fmt::print("{}\n", s);
 
     //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
     //    Description:     Undefined error
@@ -101,21 +102,100 @@ TEST_CASE( "Error message format" )
 
     std::cmatch m;
 
-    REQUIRE( std::regex_search(r.get_error().to_string().data(), m,
-                               std::regex("\\s*Error 'unknown_error' occurred at [a-zA-Z0-9/\\.]+:[0-9]+\n")) );
+    REQUIRE( std::regex_search(s.data(), m,
+                               std::regex("\\s*'unknown_error' at [a-zA-Z0-9/\\.]+:[0-9]+\n")) );
 
-    REQUIRE( std::regex_search(r.get_error().to_string().data(), m,
+    REQUIRE( std::regex_search(s.data(), m,
                                std::regex("\\s*Description:     Undefined error\n")) );
 
-    REQUIRE( std::regex_search(r.get_error().to_string().data(), m,
+    REQUIRE( std::regex_search(s.data(), m,
                                std::regex("\\s*Additional Info: UNIT TEST\n")) );
 
-    REQUIRE( std::regex_search(r.get_error().to_string().data(), m,
+    REQUIRE( std::regex_search(s.data(), m,
                                std::regex("\\s*Category:        general_error_category")) );
 
     r.dismiss();
 }
 
+TEST_CASE( "Propagate error message format" )
+{
+    mresult<> r = []() -> mresult<>
+    {
+        TRY([]() -> mresult<>
+        {
+            TRY([]() -> mresult<>
+            {
+                TRY([]() -> mresult<>
+                {
+                    return err(errors::unknown_error{}, "UNIT TEST");
+                }());
+
+                return ok();
+            }());
+
+            return ok();
+        }());
+
+        return ok();
+    }();
+
+    std::string s = fmt::format("{}", r);
+    fmt::print("{}\n", s);
+
+    //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
+    //    Description:     Undefined error
+    //    Additional Info: UNIT TEST
+    //    Category:        general_error_category
+
+//    std::cmatch m;
+//
+//    REQUIRE( std::regex_search(s.data(), m,
+//                               std::regex("\\s*Error 'unknown_error' occurred at [a-zA-Z0-9/\\.]+:[0-9]+\n")) );
+//
+//    REQUIRE( std::regex_search(s.data(), m,
+//                               std::regex("\\s*Description:     Undefined error\n")) );
+//
+//    REQUIRE( std::regex_search(s.data(), m,
+//                               std::regex("\\s*Additional Info: UNIT TEST\n")) );
+//
+//    REQUIRE( std::regex_search(s.data(), m,
+//                               std::regex("\\s*Category:        general_error_category")) );
+
+    r.dismiss();
+}
+
+TEST_CASE( "Nested error message format" )
+{
+    mresult<> r = []() -> mresult<>
+    {
+        TRY([]() -> mresult<>
+        {
+            TRY([]() -> mresult<>
+            {
+                TRY([]() -> mresult<>
+                {
+                    TRY(failed_result().handle_error([](auto&&) -> mresult<>
+                    {
+                        return err(errors::unknown_error{}, "wrapper error");
+                    }));
+
+                    return ok();
+                }());
+
+                return ok();
+            }());
+
+            return ok();
+        }());
+
+        return ok();
+    }();
+
+    std::string s = fmt::format("{}", r);
+    fmt::print("{}\n", s);
+
+    r.dismiss();
+}
 
 TEST_CASE( "Assertions" )
 {
@@ -124,20 +204,20 @@ TEST_CASE( "Assertions" )
     const auto ok_precond = []() -> mresult<> { EXPECT(true, ""); return ok(); };
     const auto failed_precond = []() -> mresult<> { EXPECT(false, ""); ; return ok();};
 
-    REQUIRE_NOTHROW( ok_result_precond().ignore() );
-    REQUIRE_THROWS( failed_result_precond().ignore() );
-    REQUIRE_NOTHROW( ok_precond().ignore() );
-    REQUIRE_THROWS( failed_precond().ignore() );
+    REQUIRE_NOTHROW( ok_result_precond().dismiss() );
+    REQUIRE_THROWS( failed_result_precond().dismiss() );
+    REQUIRE_NOTHROW( ok_precond().dismiss() );
+    REQUIRE_THROWS( failed_precond().dismiss() );
 
     const auto ok_result_postcond = []() -> mresult<> { ENSURE(ok_result(), "");  return ok();};
     const auto failed_result_postcond = []() -> mresult<> { ENSURE(failed_result(), ""); return ok(); };
     const auto ok_postcond = []() -> mresult<> { ENSURE(true, ""); return ok(); };
     const auto failed_postcond = []() -> mresult<> { ENSURE(false, ""); ; return ok();};
 
-    REQUIRE_NOTHROW( ok_result_postcond().ignore() );
-    REQUIRE_THROWS( failed_result_postcond().ignore() );
-    REQUIRE_NOTHROW( ok_postcond().ignore() );
-    REQUIRE_THROWS( failed_postcond().ignore() );
+    REQUIRE_NOTHROW( ok_result_postcond().dismiss() );
+    REQUIRE_THROWS( failed_result_postcond().dismiss() );
+    REQUIRE_NOTHROW( ok_postcond().dismiss() );
+    REQUIRE_THROWS( failed_postcond().dismiss() );
 }
 //
 //result<> foo()

@@ -7,6 +7,14 @@
 
 #include "assert.h"
 
+#define CAT( A, B ) A ## B
+#define SELECT( NAME, NUM ) CAT( NAME ## _, NUM )
+
+#define GET_COUNT( _1, _2, _3, _4, _5, _6 /* ad nauseam */, COUNT, ... ) COUNT
+#define VA_SIZE( ... ) GET_COUNT( __VA_ARGS__, 6, 5, 4, 3, 2, 1 )
+
+#define VA_SELECT( NAME, ... ) SELECT( NAME, VA_SIZE(__VA_ARGS__) )(__VA_ARGS__)
+
 #define TRY_GLUE2(x, y) x##y
 #define TRY_GLUE(x, y) TRY_GLUE2(x, y)
 #define TRY_UNIQUE_NAME TRY_GLUE(_result_unique_name_temporary, __COUNTER__)
@@ -24,7 +32,8 @@
         auto result_name = (expr); \
         if(result_name.has_failed()) \
         {                                     \
-            return detail::error(std::move(result_name).get_error()); \
+            return detail::error(std::move(result_name) \
+                .propagate_error(basic_errors::propagated_error{}, #expr, { __FILE__, __LINE__ })); \
         }                               \
     } while(false)
 
@@ -44,7 +53,13 @@
 
 #define RETURN(expr) RETURN_IMPL(TRY_UNIQUE_NAME, expr)
 
-#define err(code, explanation) detail::error(code, explanation, { __FILE__, __LINE__ })
+#define ERR_2(code, explanation) detail::error(code, explanation, { __FILE__, __LINE__ })
+
+#define ERR_3(code, explanation, result) detail::error(std::move(result) \
+                .propagate_error(code, explanation, { __FILE__, __LINE__ }));
+
+#define err( ... ) VA_SELECT( ERR, __VA_ARGS__ )
+
 
 #define EXPECT_IMPL(result_name, expr, explanation) \
     do {                                            \

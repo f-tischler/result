@@ -37,8 +37,6 @@ struct error_category_base
         : error_category(Id, name) {}
 };
 
-constexpr auto errors_per_category = 100;
-
 template<uint32_t LocalId, uint32_t CategoryId>
 constexpr uint64_t to_global_id(error_category_base<CategoryId>)
 {
@@ -119,6 +117,7 @@ public:
     error(ErrorCode&& code, source_location src_loc)
         : m_code(std::forward<ErrorCode>(code))
         , m_src_loc(src_loc)
+        , m_inner_error(nullptr)
     {
     }
 
@@ -127,6 +126,24 @@ public:
         : m_code(std::forward<ErrorCode>(code))
         , m_src_loc(src)
         , m_explanation(std::move(explanation))
+        , m_inner_error(nullptr)
+    {
+    }
+
+    template<class ErrorCode>
+    error(ErrorCode&& code, std::unique_ptr<error>&& inner_error, source_location src_loc)
+        : m_code(std::forward<ErrorCode>(code))
+        , m_src_loc(src_loc)
+        , m_inner_error(std::move(inner_error))
+    {
+    }
+
+    template<class ErrorCode>
+    error(ErrorCode&& code, std::string explanation, std::unique_ptr<error>&& inner_error, source_location src)
+        : m_code(std::forward<ErrorCode>(code))
+        , m_src_loc(src)
+        , m_explanation(std::move(explanation))
+        , m_inner_error(std::move(inner_error))
     {
     }
 
@@ -141,6 +158,7 @@ private:
     error_code m_code;
     source_location m_src_loc;
     std::string m_explanation;
+    std::unique_ptr<error> m_inner_error;
 };
 
 #endif //ERRORHANDLING_ERROR_H

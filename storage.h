@@ -9,6 +9,7 @@
 #include <variant>
 #include <optional>
 #include <memory>
+#include <gsl/assert>
 
 #if defined(__GNUC__) || defined(__clang__)
 #define finline __attribute__((always_inline))
@@ -70,6 +71,7 @@ namespace detail
         [[nodiscard]] finline auto get() & -> T& { return *m_data; }
         [[nodiscard]] finline auto get() && -> T&& { return std::move(*m_data); }
         [[nodiscard]] finline T* operator ->() { return m_data.get(); }
+        [[nodiscard]] finline T* release() { return m_data.release(); }
 
         void reset() { m_data.reset(); }
 
@@ -99,9 +101,13 @@ namespace detail
         }
 
         [[nodiscard]] finline bool has_value() const { return std::holds_alternative<Value>(m_storage); }
-        [[nodiscard]] finline auto get_value() const -> const Value& { return std::get<0>(m_storage); }
-        [[nodiscard]] finline auto get_error() const -> const Error& { return std::get<1>(m_storage).get(); }
+        [[nodiscard]] finline bool has_error() const { return !std::holds_alternative<Value>(m_storage); }
 
+        [[nodiscard]] finline auto get_value() const & -> const Value& { Expects(has_value()); return std::get<0>(m_storage); }
+        [[nodiscard]] finline auto get_error() const & -> const Error& { Expects(has_error()); return std::get<1>(m_storage).get(); }
+
+        [[nodiscard]] finline auto get_value() && -> Value&& { Expects(has_value()); return std::get<0>(std::move(m_storage)); }
+        [[nodiscard]] finline auto get_error() && -> Error&& { Expects(has_error()); return std::get<1>(std::move(m_storage)).get(); }
     private:
         result_storage_t<Value, Error> m_storage;
     };
