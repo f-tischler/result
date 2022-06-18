@@ -14,8 +14,8 @@
 namespace errors
 {
     DEFINE_ERROR_CATEGORY(3, general_error_category);
-    DEFINE_ERROR_CODE(1, general_error_category, unknown_error, "Undefined error");
-    DEFINE_ERROR_CODE(2, general_error_category, invalid_pointer_error, "Null pointer error");
+    DEFINE_ERROR_CODE(1, general_error_category, unknown_error, "Undefined make_failed_result");
+    DEFINE_ERROR_CODE(2, general_error_category, invalid_pointer_error, "Null pointer make_failed_result");
     DEFINE_ERROR_CODE(3, general_error_category, argument_out_of_range_error, "Argument out of range");
     DEFINE_ERROR_CODE(4, general_error_category, not_implemented_error, "Function not implemented");
 }
@@ -31,11 +31,22 @@ struct LogErrorOnDestruction
     }
 };
 
-static_assert(std::is_class_v<LogErrorOnDestruction>, " ");
-static_assert(std::is_default_constructible_v<LogErrorOnDestruction>, " ");
+struct FailTestOnError
+{
+    void operator()(const auto &r) const
+    {
+        if (r.has_failed())
+        {
+            FAIL_CHECK(fmt::format("unhandled error:\n{}\n", r));
+        }
+    }
+};
+
+static_assert(std::is_class_v<LogErrorOnDestruction>);
+static_assert(std::is_default_constructible_v<LogErrorOnDestruction>);
 
 template<class V = void>
-using mresult = result<V, error, LogErrorOnDestruction>;
+using mresult = result<V, error, FailTestOnError>;
 
 mresult<> ok_result() { return ok(); }
 mresult<> failed_result() { return err(errors::unknown_error{}, "failed_result"); }
@@ -96,7 +107,7 @@ TEST_CASE( "Error message format" )
     fmt::print("{}\n", s);
 
     //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
-    //    Description:     Undefined error
+    //    Description:     Undefined make_failed_result
     //    Additional Info: UNIT TEST
     //    Category:        general_error_category
 
@@ -117,7 +128,7 @@ TEST_CASE( "Error message format" )
     r.dismiss();
 }
 
-TEST_CASE( "Propagate error message format" )
+TEST_CASE( "Propagate make_failed_result message format" )
 {
     mresult<> r = []() -> mresult<>
     {
@@ -142,58 +153,40 @@ TEST_CASE( "Propagate error message format" )
     std::string s = fmt::format("{}", r);
     fmt::print("{}\n", s);
 
-    //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
-    //    Description:     Undefined error
-    //    Additional Info: UNIT TEST
-    //    Category:        general_error_category
-
-//    std::cmatch m;
-//
-//    REQUIRE( std::regex_search(s.data(), m,
-//                               std::regex("\\s*Error 'unknown_error' occurred at [a-zA-Z0-9/\\.]+:[0-9]+\n")) );
-//
-//    REQUIRE( std::regex_search(s.data(), m,
-//                               std::regex("\\s*Description:     Undefined error\n")) );
-//
-//    REQUIRE( std::regex_search(s.data(), m,
-//                               std::regex("\\s*Additional Info: UNIT TEST\n")) );
-//
-//    REQUIRE( std::regex_search(s.data(), m,
-//                               std::regex("\\s*Category:        general_error_category")) );
-
     r.dismiss();
 }
 
 TEST_CASE( "Nested error message format" )
 {
-    mresult<> r = []() -> mresult<>
+    auto try_f = [](auto f)
     {
-        TRY([]() -> mresult<>
+        return [=]() -> mresult<>
         {
-            TRY([]() -> mresult<>
+            TRY(std::invoke(f)); return ok();
+        };
+    };
+
+    auto wrap = [](auto f)
+    {
+        return [=]() -> mresult<>
+        {
+            TRY(std::invoke(f).handle_error([](auto &&) -> mresult<>
             {
-                TRY([]() -> mresult<>
-                {
-                    TRY(failed_result().handle_error([](auto&&) -> mresult<>
-                    {
-                        return err(errors::unknown_error{}, "wrapper error");
-                    }));
-
-                    return ok();
-                }());
-
-                return ok();
-            }());
+                return err(errors::unknown_error{}, "wrapper make_failed_result");
+            }));
 
             return ok();
-        }());
+        };
+    };
 
-        return ok();
-    }();
+    mresult<> r = std::invoke(
+        try_f(
+            try_f(
+                try_f(
+                    wrap(
+                        try_f([]() -> mresult<> { return err(errors::not_implemented_error{}, ""); }))))));
 
-    std::string s = fmt::format("{}", r);
-    fmt::print("{}\n", s);
-
+    fmt::print("{}\n", r);
     r.dismiss();
 }
 
@@ -219,6 +212,42 @@ TEST_CASE( "Assertions" )
     REQUIRE_NOTHROW( ok_postcond().dismiss() );
     REQUIRE_THROWS( failed_postcond().dismiss() );
 }
+
+TEST_CASE( "Valid error data" )
+{
+    error e{errors::unknown_error{}, {__FILE__, __LINE__} };
+
+    e.set_data(std::string("test"));
+
+    REQUIRE("test" == e.get_data<std::string>());
+}
+
+TEST_CASE( "Invalid error data" )
+{
+    error e{errors::unknown_error{}, {__FILE__, __LINE__} };
+
+    e.set_data(1);
+
+    REQUIRE_THROWS(e.get_data<std::string>().resize(1));
+}
+
+TEST_CASE( "Creating failed result data" )
+{
+    mresult<> r = err(errors::unknown_error{}, "this is test failure", 1);
+    REQUIRE(r.get_error().get_data<int>() == 1);
+}
+
+TEST_CASE( "Propagate failed result data" )
+{
+    const auto fail_with_data = []() -> mresult<> { return err(errors::unknown_error{}, "this is test failure", 1); };
+
+    auto r = [=]() -> mresult<> { TRY(fail_with_data()); return ok(); }();
+
+    REQUIRE_THROWS((void)r.get_error().get_data<int>());
+    REQUIRE(r.get_error().get_inner_error() != nullptr);
+    REQUIRE(r.get_error().get_inner_error()->get_data<int>() == 1);
+}
+
 //
 //result<> foo()
 //{
@@ -239,7 +268,7 @@ TEST_CASE( "Assertions" )
 //{
 //    const auto r = foo3();
 //    if(r.has_failed())
-//        return detail::error(r.get_error());
+//        return detail::make_failed_result(r.get_error());
 //
 //    return ok();
 //}
@@ -289,7 +318,7 @@ TEST_CASE( "Assertions" )
 //            switch (e)
 //            {
 //                case errors::invalid_pointer_error{}:   return ok();
-//                default:                                return err(errors::unknown_error{}, "unable to handle error");
+//                default:                                return err(errors::unknown_error{}, "unable to handle make_failed_result");
 //            }
 //        }));
 //}

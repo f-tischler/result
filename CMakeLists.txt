@@ -16,8 +16,9 @@ conan_cmake_run(REQUIRES
                 doctest/2.4.8
                 fmt/8.1.1
                 ms-gsl/4.0.0
+                backward-cpp/1.6
                 BASIC_SETUP
                 BUILD missing)
 
-add_executable(ErrorHandling main.cpp result.h storage.h error.h macros.h assert.h define_error.h common_errors.h formatting.h)
+add_executable(ErrorHandling main.cpp result.h storage.h error.h macros.h assert.h define_error.h common_errors.h formatting.h types.h make_result.h)
 target_link_libraries(ErrorHandling ${CONAN_LIBS})

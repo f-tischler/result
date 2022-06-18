@@ -36,7 +36,8 @@ struct fmt::formatter<error>
                             "{}{}'{}' at {}:{}\n"
                             "{}    Description:     {}\n"
                             "{}"
-                            "{}    Category:        {}\n",
+                            "{}    Category:        {}\n"
+                            "{}",
                             indent.data(),
                             cause ? "| caused by " : "",
                             e.get_code().get_name(),
@@ -50,7 +51,12 @@ struct fmt::formatter<error>
                                               indent.data(),
                                               e.get_explanation()),
                             indent.data(),
-                            e.get_code().get_category().get_name());
+                            e.get_code().get_category().get_name(),
+                            !e.has_data()
+                                ? ""
+                                : fmt::format("{}    error data type: {}\n",
+                                              indent.data(),
+                                              e.get_data_type()));
         };
 
         auto it = format();

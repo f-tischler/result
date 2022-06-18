@@ -7,6 +7,49 @@
 
 #include "assert.h"
 
+namespace detail
+{
+
+    template<class ErrorCode, class V, class E, class L>
+    auto resolve_failed_result(ErrorCode &&code,
+                               std::string_view explanation,
+                               result<V, E, L> &&result,
+                               source_location origin)
+    {
+        return detail::make_failed_result(std::forward<ErrorCode>(code),
+                                          std::string(explanation),
+                                          std::move(result).release_error(),
+                                          origin);
+    }
+
+    template<class ErrorCode, class T>
+    auto resolve_failed_result(ErrorCode &&code,
+                               std::string_view explanation,
+                               T &&data,
+                               source_location origin)
+    {
+        return detail::make_failed_result(std::forward<ErrorCode>(code),
+                                          std::string(explanation),
+                                          std::forward<T>(data),
+                                          origin);
+    }
+
+    template<class ErrorCode, class V, class E, class L, class T>
+    auto resolve_failed_result(ErrorCode &&code,
+                               std::string_view explanation,
+                               result <V, E, L> &result,
+                               T &&data,
+                               source_location origin)
+    {
+        return detail::make_failed_result(std::forward<ErrorCode>(code),
+                                          std::string(explanation),
+                                          std::move(result).release_error(),
+                                          std::forward<T>(data),
+                                          origin);
+    }
+
+}
+
 #define CAT( A, B ) A ## B
 #define SELECT( NAME, NUM ) CAT( NAME ## _, NUM )
 
@@ -23,7 +66,10 @@
     auto result_name = (expr); \
     if(result_name.has_failed()) \
     {                                     \
-        return detail::error(std::move(result_name).get_error()); \
+        return detail::make_failed_result(basic_errors::propagated_error{}, \
+                                          #expr, \
+                                          std::move(result_name).release_error(), \
+                                          { __FILE__, __LINE__ }); \
     } \
     init = std::move(result_name).get_value()
 
@@ -32,8 +78,10 @@
         auto result_name = (expr); \
         if(result_name.has_failed()) \
         {                                     \
-            return detail::error(std::move(result_name) \
-                .propagate_error(basic_errors::propagated_error{}, #expr, { __FILE__, __LINE__ })); \
+            return detail::make_failed_result(basic_errors::propagated_error{}, \
+                                              #expr,                            \
+                                              std::move(result_name).release_error(), \
+                                              { __FILE__, __LINE__ }); \
         }                               \
     } while(false)
 
@@ -42,7 +90,10 @@
         auto result_name = (expr); \
         if(result_name.has_failed()) \
         {                                     \
-            return detail::error(std::move(result_name).get_error()); \
+            return detail::make_failed_result(basic_errors::propagated_error{}, \
+                                              #expr,                            \
+                                              std::move(result_name).release_error(), \
+                                              { __FILE__, __LINE__ }); \
         }                              \
         return result_name; \
     } while(false)
@@ -53,13 +104,21 @@
 
 #define RETURN(expr) RETURN_IMPL(TRY_UNIQUE_NAME, expr)
 
-#define ERR_2(code, explanation) detail::error(code, explanation, { __FILE__, __LINE__ })
+template<class T>
+struct is_result_t : std::bool_constant<false> {};
 
-#define ERR_3(code, explanation, result) detail::error(std::move(result) \
-                .propagate_error(code, explanation, { __FILE__, __LINE__ }));
+template<class V, class E, class L>
+struct is_result_t<result<V, E, L>> : std::bool_constant<true> {};
+
+#define ERR_2(code, explanation) detail::make_failed_result(code, explanation, { __FILE__, __LINE__ })
+
+#define ERR_3(code, explanation, result_or_data) \
+    detail::resolve_failed_result(code, explanation, result_or_data, { __FILE__, __LINE__ });
+
+#define ERR_4(code, explanation, data, result) \
+    detail::resolve_failed_result(code, explanation, result, data, { __FILE__, __LINE__ });
 
 #define err( ... ) VA_SELECT( ERR, __VA_ARGS__ )
-
 
 #define EXPECT_IMPL(result_name, expr, explanation) \
     do {                                            \

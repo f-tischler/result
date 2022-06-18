@@ -7,7 +7,9 @@
 
 #include <sstream>
 #include <cxxabi.h>
-#include <fmt/core.h>
+#include <any>
+
+//#include <backward.hpp>
 
 struct error_category
 {
@@ -21,7 +23,6 @@ public:
 
     [[nodiscard]] constexpr auto get_id() const -> int32_t { return m_id; }
     [[nodiscard]] constexpr auto get_name() const -> std::string_view { return m_name; }
-
     [[nodiscard]] constexpr bool operator==(const error_category& rhs) const { return m_id == rhs.m_id; }
 
 private:
@@ -33,7 +34,7 @@ template<uint32_t Id>
 struct error_category_base
     : error_category
 {
-    constexpr error_category_base(std::string_view name)
+    explicit constexpr error_category_base(std::string_view name)
         : error_category(Id, name) {}
 };
 
@@ -57,12 +58,11 @@ public:
     {
     }
 
-    [[nodiscard]] constexpr auto get_category() const -> const error_category& { return m_category; }
-    [[nodiscard]] constexpr auto get_id() const -> uint64_t { return m_global_id; }
-    [[nodiscard]] constexpr auto get_name() const -> std::string_view { return m_name; }
-    [[nodiscard]] constexpr auto get_description() const -> std::string_view { return m_description; }
-
-    finline constexpr operator uint64_t() const { return m_global_id; } // NOLINT(google-explicit-constructor)
+    [[nodiscard]] finline constexpr auto get_category() const -> const error_category& { return m_category; }
+    [[nodiscard]] finline constexpr auto get_id() const -> uint64_t { return m_global_id; }
+    [[nodiscard]] finline constexpr auto get_name() const -> std::string_view { return m_name; }
+    [[nodiscard]] finline constexpr auto get_description() const -> std::string_view { return m_description; }
+    [[nodiscard]] finline constexpr operator uint64_t() const { return m_global_id; } // NOLINT(google-explicit-constructor)
 
 private:
     error_category m_category;
@@ -84,26 +84,6 @@ struct error_code_base : error_code
     static constexpr uint32_t category_id = Category::id;
 };
 
-//std::string to_string(const std::type_info& type)
-//{
-//    size_t size = 256;
-//    char* buf = static_cast<char*>(malloc(size));
-//    int status;
-//
-//    buf = abi::__cxa_demangle(type.name(), buf, &size, &status);
-//
-//    if(status != 0)
-//        return "<invalid name>";
-//
-//    std::string output(buf);
-//    free(buf);
-//    auto pos = output.rfind("::");
-//    if(pos == std::string::npos)
-//        return output;
-//
-//    return output.substr(pos + 2);
-//}
-
 struct source_location
 {
     const char* file;
@@ -114,34 +94,29 @@ class error
 {
 public:
     template<class ErrorCode>
-    error(ErrorCode&& code, source_location src_loc)
-        : m_code(std::forward<ErrorCode>(code))
-        , m_src_loc(src_loc)
-        , m_inner_error(nullptr)
+    error(ErrorCode&& code, source_location origin)
+        : error(std::forward<ErrorCode&&>(code), {}, nullptr, origin)
+    {
+//        m_bt.load_here();
+    }
+
+    template<class ErrorCode>
+    error(ErrorCode&& code, std::string explanation, source_location origin)
+        : error(std::forward<ErrorCode&&>(code), std::move(explanation), nullptr, origin)
+    {
+//        m_bt.load_here();
+    }
+
+    template<class ErrorCode>
+    error(ErrorCode&& code, std::unique_ptr<error>&& inner_error, source_location origin)
+        : error(std::forward<ErrorCode&&>(code), {}, std::move(inner_error), origin)
     {
     }
 
     template<class ErrorCode>
-    error(ErrorCode&& code, std::string explanation, source_location src)
-        : m_code(std::forward<ErrorCode>(code))
-        , m_src_loc(src)
-        , m_explanation(std::move(explanation))
-        , m_inner_error(nullptr)
-    {
-    }
-
-    template<class ErrorCode>
-    error(ErrorCode&& code, std::unique_ptr<error>&& inner_error, source_location src_loc)
-        : m_code(std::forward<ErrorCode>(code))
-        , m_src_loc(src_loc)
-        , m_inner_error(std::move(inner_error))
-    {
-    }
-
-    template<class ErrorCode>
-    error(ErrorCode&& code, std::string explanation, std::unique_ptr<error>&& inner_error, source_location src)
-        : m_code(std::forward<ErrorCode>(code))
-        , m_src_loc(src)
+    error(ErrorCode&& code, std::string explanation, std::unique_ptr<error>&& inner_error, source_location origin)
+        : m_code(std::forward<ErrorCode&&>(code))
+        , m_origin(origin)
         , m_explanation(std::move(explanation))
         , m_inner_error(std::move(inner_error))
     {
@@ -149,16 +124,31 @@ public:
 
     [[nodiscard]] finline auto get_code() const -> const error_code& { return m_code; }
     [[nodiscard]] finline auto get_explanation() const -> std::string_view { return m_explanation; }
-    [[nodiscard]] finline auto get_origin() const -> const source_location& { return m_src_loc; }
+    [[nodiscard]] finline auto get_origin() const -> const source_location& { return m_origin; }
     [[nodiscard]] finline auto get_inner_error() const -> const error* { return m_inner_error.get(); }
+    [[nodiscard]] finline operator uint64_t() const { return m_code.get_id(); } // NOLINT(google-explicit-constructor)
 
-    finline operator uint64_t() const { return m_code.get_id(); } // NOLINT(google-explicit-constructor)
+    template<typename T>
+    [[nodiscard]] finline auto get_data() -> T& { return any_cast<T&>(m_data); }
+
+    template<typename T>
+    [[nodiscard]] finline auto get_data() const -> const T& { return any_cast<const T&>(m_data); }
+
+    [[nodiscard]] finline bool has_data() const { return m_data.has_value(); }
+    [[nodiscard]] finline auto get_data_type() const -> std::string_view { return m_data.type().name(); }
+
+    template<typename T>
+    finline error& set_data(T&& data) { m_data = std::forward<T&&>(data); return *this; }
+
+
 
 private:
     error_code m_code;
-    source_location m_src_loc;
+    source_location m_origin;
     std::string m_explanation;
     std::unique_ptr<error> m_inner_error;
+    std::any m_data;
+//    backward::StackTrace m_bt;
 };
 
 #endif //ERRORHANDLING_ERROR_H

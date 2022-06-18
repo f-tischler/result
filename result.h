@@ -12,6 +12,8 @@
 #include "error.h"
 
 #include "common_errors.h"
+#include "assert.h"
+#include "types.h"
 
 #if defined(__clang__) || defined(__GNUC__)
 #define ERR_LIKELY(x) __builtin_expect(!!(x), 1)
@@ -20,71 +22,6 @@
 #define GSL_LIKELY(x) (!!(x))
 #define GSL_UNLIKELY(x) (!!(x))
 #endif // defined(__clang__) || defined(__GNUC__)
-
-namespace detail
-{
-
-template<class T = void>
-struct [[nodiscard]] ok_result
-{
-    T value;
-};
-
-template<>
-struct [[nodiscard]] ok_result<void>
-{
-};
-
-template<class T>
-struct [[nodiscard]] failed_result
-{
-    T error;
-};
-
-template<class Error = error>
-detail::failed_result<std::decay_t<Error>> error(Error&& error)
-{
-    return { .error = std::forward<Error>(error) };
-}
-
-template<class ErrorCode, class Error = class error>
-detail::failed_result<std::decay_t<Error>> error(ErrorCode code, std::string explanation, source_location src_loc)
-{
-    Error e{ code, explanation, src_loc };
-
-    if(code.get_category() == assertion_errors::assertion_category{})
-        throw std::logic_error(fmt::format("{}", e));
-
-    return { .error = std::move(e) };
-}
-
-struct default_final_action
-{
-    template<class T>
-    constexpr void operator()(const T&) const { };
-} g_default_final_action;
-
-template<class T, class R>
-constexpr inline bool is_final_action_v =
-    std::is_invocable_v<T, const R&> &&
-    std::is_class_v<T> &&
-    std::is_default_constructible_v<T>;
-
-}
-
-detail::ok_result<> ok()
-{
-    return {};
-}
-
-template<class Value, typename std::enable_if_t<!std::is_lvalue_reference_v<Value>>* = nullptr>
-detail::ok_result<std::remove_const_t<Value>> ok(Value value)
-{
-    return { .value = std::move(value) };
-}
-
-template<class Value = void, class Error = error, class FinalAction = detail::default_final_action>
-class result;
 
 template<class Value, class Error, class FinalAction>
 class [[nodiscard]] result
@@ -131,7 +68,7 @@ public:
     [[nodiscard]] result handle_error(F func) // -> decltype(std::invoke(func, get_error()))
     {
         static_assert(std::is_same_v<std::invoke_result_t<F, Error>, result>,
-                "error handler must return the same result type");
+                "make_failed_result handler must return the same result type");
 
         if(is_ok())
         {
@@ -144,10 +81,11 @@ public:
             return std::move(r);
         }
 
-        return detail::error(std::move(*this).propagate_error(
-                                r.get_error().get_code(),
-                                r.get_error().get_explanation(),
-                                r.get_error().get_origin()));
+        return detail::make_failed_result(
+                r.get_error().get_code(),
+                std::string(r.get_error().get_explanation()),
+                std::move(*this).release_error(),
+                r.get_error().get_origin());
     }
 
     template<class F, typename = std::enable_if_t<std::is_invocable_v<F, Value>>>
@@ -174,12 +112,9 @@ public:
 
     finline void ignore() const { }
 
-    Error propagate_error(const error_code& ec, std::string_view explanation, source_location origin) &&
+    auto release_error() && -> std::unique_ptr<Error>
     {
-        return Error(ec,
-                     std::string(explanation),
-                     std::make_unique<Error>(std::move(get_storage()).get_error()),
-                     origin);
+        return std::make_unique<Error>(std::move(get_storage()).get_error());
     }
 
     ~result()
@@ -197,11 +132,11 @@ private:
 
 // sbo
 static_assert(sizeof(result<char, error>) == sizeof(detail::result_storage<char, error>),
-              "result<T> with default final action must only occupy memory to store the error/value");
+              "result<T> with default final action must only occupy memory to store the make_failed_result/value");
 
 // heap
 static_assert(sizeof(result<char[sizeof(error) + 1], error>) == sizeof(detail::result_storage<char[sizeof(error) + 1], error>),
-              "result<T> with default final action must only occupy memory to store the error/value");
+              "result<T> with default final action must only occupy memory to store the make_failed_result/value");
 
 template<class Error, class FinalAction>
 class [[nodiscard]] result<void, Error, FinalAction> {
@@ -256,10 +191,11 @@ public:
             return std::move(r);
         }
 
-        return detail::error(std::move(*this).propagate_error(
+        return detail::make_failed_result(
                 r.get_error().get_code(),
-                r.get_error().get_explanation(),
-                r.get_error().get_origin()));
+                std::string(r.get_error().get_explanation()),
+                std::move(*this).release_error(),
+                r.get_error().get_origin());
     }
 
     // will NOT suppress call of final action
@@ -268,12 +204,9 @@ public:
     // will suppress call of final action
     finline void dismiss() { get_error_storage().reset(); }
 
-    Error propagate_error(const error_code& ec, std::string_view explanation, source_location origin) &&
+    auto release_error() && -> std::unique_ptr<Error>
     {
-        return Error(ec,
-                     std::string(explanation),
-                     std::unique_ptr<Error>(get_error_storage().release()),
-                     origin);
+        return std::unique_ptr<Error>(get_error_storage().release());
     }
 
     ~result()
@@ -290,7 +223,7 @@ private:
 };
 
 static_assert(sizeof(result<void, error>) == sizeof(detail::pointer_storage<error>),
-              "result with default final action must only occupy memory to store the error");
+              "result with default final action must only occupy memory to store the make_failed_result");
 
 template<class V, class E, class F>
 std::ostream& operator<<(std::ostream& os, const result<V, E, F>& result)
