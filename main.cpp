@@ -7,6 +7,8 @@
 #include <doctest/doctest.h>
 #include <regex>
 
+#define ASSERTIONS_TERMINATE
+
 #include "result.h"
 #include "formatting.h"
 #include "macros.h"
@@ -14,15 +16,15 @@
 namespace errors
 {
     DEFINE_ERROR_CATEGORY(3, general_error_category);
-    DEFINE_ERROR_CODE(1, general_error_category, unknown_error, "Undefined make_failed_result");
-    DEFINE_ERROR_CODE(2, general_error_category, invalid_pointer_error, "Null pointer make_failed_result");
+    DEFINE_ERROR_CODE(1, general_error_category, unknown_error, "Undefined error");
+    DEFINE_ERROR_CODE(2, general_error_category, invalid_pointer_error, "Null pointer make_failure");
     DEFINE_ERROR_CODE(3, general_error_category, argument_out_of_range_error, "Argument out of range");
     DEFINE_ERROR_CODE(4, general_error_category, not_implemented_error, "Function not implemented");
 }
 
 struct LogErrorOnDestruction
 {
-    void operator()(const auto &r) const
+    void operator()(const auto &r) const noexcept
     {
         if (r.has_failed())
         {
@@ -33,7 +35,7 @@ struct LogErrorOnDestruction
 
 struct FailTestOnError
 {
-    void operator()(const auto &r) const
+    void operator()(const auto &r) const noexcept
     {
         if (r.has_failed())
         {
@@ -46,10 +48,10 @@ static_assert(std::is_class_v<LogErrorOnDestruction>);
 static_assert(std::is_default_constructible_v<LogErrorOnDestruction>);
 
 template<class V = void>
-using mresult = result<V, error, FailTestOnError>;
+using mresult = result<V, error, LogErrorOnDestruction>;
 
 mresult<> ok_result() { return ok(); }
-mresult<> failed_result() { return err(errors::unknown_error{}, "failed_result"); }
+mresult<> failed_result() { return err(errors::unknown_error{}, "failure"); }
 mresult<int> ok_int_result() { return ok(1); }
 mresult<int> failed_int_result() { return err(errors::unknown_error{}, "failed_int_result"); }
 
@@ -107,7 +109,7 @@ TEST_CASE( "Error message format" )
     fmt::print("{}\n", s);
 
     //    Error 'unknown_error' occurred at /mnt/d/Dev/Projects/ErrorHandling/main.cpp:71
-    //    Description:     Undefined make_failed_result
+    //    Description:     Undefined make_failure
     //    Additional Info: UNIT TEST
     //    Category:        general_error_category
 
@@ -128,7 +130,7 @@ TEST_CASE( "Error message format" )
     r.dismiss();
 }
 
-TEST_CASE( "Propagate make_failed_result message format" )
+TEST_CASE( "Propagate make_failure message format" )
 {
     mresult<> r = []() -> mresult<>
     {
@@ -172,7 +174,7 @@ TEST_CASE( "Nested error message format" )
         {
             TRY(std::invoke(f).handle_error([](auto &&) -> mresult<>
             {
-                return err(errors::unknown_error{}, "wrapper make_failed_result");
+                return err(errors::unknown_error{}, "wrapper make_failure");
             }));
 
             return ok();
@@ -248,6 +250,38 @@ TEST_CASE( "Propagate failed result data" )
     REQUIRE(r.get_error().get_inner_error()->get_data<int>() == 1);
 }
 
+TEST_CASE( "Handle error using 'handle_error'")
+{
+    using namespace errors;
+
+    mresult<> r = err(invalid_pointer_error{}, "this is test failure");
+    REQUIRE(r.handle_error(
+        [](const auto& e) -> result<>
+        {
+            switch (e)
+            {
+                case invalid_pointer_error{}:   return ok();
+                default:                        return err(unknown_error{}, "unable to handle make_failure");
+            }
+        }).is_ok());
+}
+
+TEST_CASE( "Handle error using 'handle_error' - map error")
+{
+    using namespace errors;
+
+    mresult<> r = err(not_implemented_error{}, "this is test failure that can not be handled");
+    REQUIRE(r.handle_error(
+            [](const auto& e) -> result<>
+            {
+                switch (e)
+                {
+                    case invalid_pointer_error{}:   return ok();
+                    default:                        return err(unknown_error{}, "unable to handle make_failure");
+                }
+            }).has_failed());
+}
+
 //
 //result<> foo()
 //{
@@ -268,7 +302,7 @@ TEST_CASE( "Propagate failed result data" )
 //{
 //    const auto r = foo3();
 //    if(r.has_failed())
-//        return detail::make_failed_result(r.get_error());
+//        return detail::make_failure(r.get_error());
 //
 //    return ok();
 //}
@@ -310,18 +344,7 @@ TEST_CASE( "Propagate failed result data" )
 //    return r;
 //}
 //
-//result<> foo10()
-//{
-//    RETURN(foo2().handle_error(
-//        [](auto e) -> result<>
-//        {
-//            switch (e)
-//            {
-//                case errors::invalid_pointer_error{}:   return ok();
-//                default:                                return err(errors::unknown_error{}, "unable to handle make_failed_result");
-//            }
-//        }));
-//}
+
 //
 //result<std::string> foo11()
 //{

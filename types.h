@@ -6,18 +6,17 @@
 
 #include <type_traits>
 
-namespace detail {
-
-    struct default_final_action {
-        template<class T>
-        constexpr void operator()(const T &) const {};
-    } g_default_final_action;
-
+namespace detail
+{
     template<class T, class R>
     constexpr inline bool is_final_action_v =
-            std::is_invocable_v<T, const R &> &&
+            std::is_nothrow_invocable_v<T, const R &> &&
             std::is_class_v<T> &&
             std::is_default_constructible_v<T>;
+
+    using default_final_action = decltype([](const auto&) noexcept {});
+
+    static_assert(is_final_action_v<default_final_action, int>);
 }
 
 class error;

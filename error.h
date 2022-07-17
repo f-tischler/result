@@ -114,12 +114,35 @@ public:
     }
 
     template<class ErrorCode>
-    error(ErrorCode&& code, std::string explanation, std::unique_ptr<error>&& inner_error, source_location origin)
+    error(ErrorCode&& code,
+          std::string explanation,
+          std::unique_ptr<error>&& inner_error,
+          source_location origin)
         : m_code(std::forward<ErrorCode&&>(code))
         , m_origin(origin)
         , m_explanation(std::move(explanation))
         , m_inner_error(std::move(inner_error))
     {
+    }
+
+    template<class ErrorCode, class Data>
+    error(ErrorCode&& code,
+          std::string explanation,
+          std::unique_ptr<error>&& inner_error,
+          source_location origin,
+          Data&& data)
+        : m_code(std::forward<ErrorCode&&>(code))
+        , m_origin(origin)
+        , m_explanation(std::move(explanation))
+        , m_inner_error(std::move(inner_error))
+        , m_data(std::forward<Data>(data))
+    {
+    }
+
+    error(error&& e, std::unique_ptr<error>&& inner_error)
+        : error(std::move(e))
+    {
+        m_inner_error = std::move(inner_error);
     }
 
     [[nodiscard]] finline auto get_code() const -> const error_code& { return m_code; }
@@ -140,7 +163,7 @@ public:
     template<typename T>
     finline error& set_data(T&& data) { m_data = std::forward<T&&>(data); return *this; }
 
-
+    finline error& set_inner_error(std::unique_ptr<error> inner) { m_inner_error = std::move(inner); return *this; }
 
 private:
     error_code m_code;
@@ -150,5 +173,13 @@ private:
     std::any m_data;
 //    backward::StackTrace m_bt;
 };
+
+template<auto> struct _size{};
+
+_size<sizeof(error)> s;
+_size<sizeof(std::any)> s1;
+_size<sizeof(std::string)> s2;
+_size<sizeof(std::unique_ptr<error>)> s3;
+_size<sizeof(error_code)> s4;
 
 #endif //ERRORHANDLING_ERROR_H

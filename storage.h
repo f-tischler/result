@@ -66,6 +66,11 @@ namespace detail
         {
         }
 
+        pointer_storage(std::unique_ptr<T>&& error)
+            : m_data(std::move(error))
+        {
+        }
+
         [[nodiscard]] finline bool has_value() const { return m_data != nullptr; }
         [[nodiscard]] finline auto get() const & -> const T& { return *m_data; }
         [[nodiscard]] finline auto get() & -> T& { return *m_data; }
@@ -97,6 +102,11 @@ namespace detail
 
         explicit result_storage(Error&& error)
             : m_storage(error_storage_type(std::move(error)))
+        {
+        }
+
+        explicit result_storage(error_storage_type&& error)
+                : m_storage(error_storage_type(std::move(error)))
         {
         }
 

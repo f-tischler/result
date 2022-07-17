@@ -7,6 +7,14 @@
 
 #include "assert.h"
 
+#if defined(__clang__) || defined(__GNUC__)
+#define ERR_LIKELY(x) __builtin_expect(!!(x), 1)
+#define ERR_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#else
+#define ERR_LIKELY(x) (!!(x))
+#define ERR_UNLIKELY(x) (!!(x))
+#endif // defined(__clang__) || defined(__GNUC__)
+
 namespace detail
 {
 
@@ -16,10 +24,10 @@ namespace detail
                                result<V, E, L> &&result,
                                source_location origin)
     {
-        return detail::make_failed_result(std::forward<ErrorCode>(code),
-                                          std::string(explanation),
-                                          std::move(result).release_error(),
-                                          origin);
+        return detail::make_failure(std::forward<ErrorCode>(code),
+                                    std::string(explanation),
+                                    std::move(result).release_error(),
+                                    origin);
     }
 
     template<class ErrorCode, class T>
@@ -28,10 +36,10 @@ namespace detail
                                T &&data,
                                source_location origin)
     {
-        return detail::make_failed_result(std::forward<ErrorCode>(code),
-                                          std::string(explanation),
-                                          std::forward<T>(data),
-                                          origin);
+        return detail::make_failure(std::forward<ErrorCode>(code),
+                                    std::string(explanation),
+                                    std::forward<T>(data),
+                                    origin);
     }
 
     template<class ErrorCode, class V, class E, class L, class T>
@@ -41,11 +49,11 @@ namespace detail
                                T &&data,
                                source_location origin)
     {
-        return detail::make_failed_result(std::forward<ErrorCode>(code),
-                                          std::string(explanation),
-                                          std::move(result).release_error(),
-                                          std::forward<T>(data),
-                                          origin);
+        return detail::make_failure(std::forward<ErrorCode>(code),
+                                    std::string(explanation),
+                                    std::move(result).release_error(),
+                                    std::forward<T>(data),
+                                    origin);
     }
 
 }
@@ -66,10 +74,10 @@ namespace detail
     auto result_name = (expr); \
     if(result_name.has_failed()) \
     {                                     \
-        return detail::make_failed_result(basic_errors::propagated_error{}, \
-                                          #expr, \
-                                          std::move(result_name).release_error(), \
-                                          { __FILE__, __LINE__ }); \
+        return detail::make_failure(basic_errors::propagated_error{}, \
+                                    #expr, \
+                                    std::move(result_name).release_error(), \
+                                    { __FILE__, __LINE__ }); \
     } \
     init = std::move(result_name).get_value()
 
@@ -78,10 +86,10 @@ namespace detail
         auto result_name = (expr); \
         if(result_name.has_failed()) \
         {                                     \
-            return detail::make_failed_result(basic_errors::propagated_error{}, \
-                                              #expr,                            \
-                                              std::move(result_name).release_error(), \
-                                              { __FILE__, __LINE__ }); \
+            return detail::make_failure(basic_errors::propagated_error{}, \
+                                        #expr,                            \
+                                        std::move(result_name).release_error(), \
+                                        { __FILE__, __LINE__ }); \
         }                               \
     } while(false)
 
@@ -90,10 +98,10 @@ namespace detail
         auto result_name = (expr); \
         if(result_name.has_failed()) \
         {                                     \
-            return detail::make_failed_result(basic_errors::propagated_error{}, \
-                                              #expr,                            \
-                                              std::move(result_name).release_error(), \
-                                              { __FILE__, __LINE__ }); \
+            return detail::make_failure(basic_errors::propagated_error{}, \
+                                        #expr,                            \
+                                        std::move(result_name).release_error(), \
+                                        { __FILE__, __LINE__ }); \
         }                              \
         return result_name; \
     } while(false)
@@ -110,7 +118,7 @@ struct is_result_t : std::bool_constant<false> {};
 template<class V, class E, class L>
 struct is_result_t<result<V, E, L>> : std::bool_constant<true> {};
 
-#define ERR_2(code, explanation) detail::make_failed_result(code, explanation, { __FILE__, __LINE__ })
+#define ERR_2(code, explanation) detail::make_failure(code, explanation, { __FILE__, __LINE__ })
 
 #define ERR_3(code, explanation, result_or_data) \
     detail::resolve_failed_result(code, explanation, result_or_data, { __FILE__, __LINE__ });
