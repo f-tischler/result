@@ -23,11 +23,14 @@ jobs:
     - uses: KyleMayes/install-llvm-action@v1.5.3
       with:
         version: 14
+        
+    - name: print llvm
+      run: ll ${{env.LLVM_PATH}}
 
     - name: Configure CMake
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} CMAKE_C_COMPILER=${{env.LLVM_PATH}}/clang -D CMAKE_CXX_COMPILER=${{env.LLVM_PATH}}/clang++
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_C_COMPILER=${{env.LLVM_PATH}}/clang -DCMAKE_CXX_COMPILER=${{env.LLVM_PATH}}/clang++
       
     - name: Build
       # Build your program with the given configuration
